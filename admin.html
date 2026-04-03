@@ -22,7 +22,10 @@
                 <div class="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white font-black">A</div>
                 <h1 class="text-2xl font-black text-slate-900 tracking-tighter uppercase">Project <span class="text-blue-600">Engine</span></h1>
             </div>
-            <div class="flex items-center gap-3">
+            <div class="flex items-center gap-4">
+                <label class="text-xs font-bold text-slate-500 flex items-center gap-1.5 cursor-pointer hover:text-blue-600 transition">
+                    <input type="checkbox" id="showArchived" onchange="loadAll()" class="w-4 h-4 rounded border-slate-300"> 書庫(アーカイブ)も表示
+                </label>
                 <span id="loadingIndicator" class="hidden flex items-center text-xs font-bold text-slate-400 gap-2"><div class="loader"></div>通信中...</span>
                 <button onclick="loadAll()" class="bg-slate-900 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-slate-800 active:scale-95 transition shadow-lg">更新</button>
             </div>
@@ -106,17 +109,20 @@
                         <!-- ステータス管理 -->
                         <div id="content-overview" class="tab-pane space-y-5 max-w-lg mx-auto">
                             <div class="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
-                                <div><label class="text-[10px] font-bold text-slate-500">進捗ステータス</label>
-                                <select id="editStatus" class="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold border outline-none mt-1">
-                                    <option value="受注完了">受注完了</option><option value="作業中">作業中</option><option value="レビュー中">レビュー中</option><option value="支払い待ち">支払い待ち</option><option value="納品完了">納品完了</option>
-                                </select></div>
+                                <div>
+                                    <label class="text-[10px] font-bold text-slate-500">進捗ステータス</label>
+                                    <select id="editStatus" class="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold border outline-none mt-1">
+                                        <option value="受注完了">受注完了</option><option value="作業中">作業中</option><option value="レビュー中">レビュー中</option>
+                                        <option value="支払い待ち">支払い待ち</option><option value="納品完了">納品完了</option><option value="完了">完了 (アーカイブ推奨)</option>
+                                    </select>
+                                </div>
                                 
                                 <div class="bg-red-50 p-3 rounded-xl border border-red-200">
                                     <label class="text-[10px] font-black text-red-600 uppercase flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg> 滞納・警告メッセージ (顧客最上部に表示)</label>
                                     <textarea id="editWarning" placeholder="空欄の場合は表示されません" class="w-full p-3 bg-white rounded-xl text-sm h-16 border outline-none resize-none mt-2 focus:border-red-400"></textarea>
                                 </div>
 
-                                <div><label class="text-[10px] font-bold text-slate-500">詳細レポート(通常)</label>
+                                <div><label class="text-[10px] font-bold text-slate-500">詳細レポート(Markdown対応: # 大見出し)</label>
                                 <textarea id="editSubStatus" placeholder="顧客に見える進捗レポート" class="w-full p-3 bg-slate-50 rounded-xl text-sm h-24 border outline-none resize-none mt-1"></textarea></div>
                                 
                                 <div class="flex gap-3">
@@ -232,6 +238,10 @@
         let activePid = null;
         let currentGrandTotal = 0;
         let chatTimer = null;
+        let adminMessages = [];
+        let lastMsgCount = 0;
+        let archivedPjs = JSON.parse(localStorage.getItem('archived_pjs') || '[]');
+
         document.getElementById('genStart').valueAsDate = new Date();
         document.getElementById('exPayDate').valueAsDate = new Date();
 
@@ -240,8 +250,16 @@
             document.querySelectorAll('[id^="tab-"]').forEach(el => el.classList.remove('tab-active', 'text-slate-900'));
             document.getElementById(`content-${t}`).classList.remove('hidden');
             document.getElementById(`tab-${t}`).classList.add('tab-active', 'text-slate-900');
-            if(t === 'chat') { refreshAdminChat(); chatTimer = setInterval(refreshAdminChat, 5000); }
+            if(t === 'chat') { refreshAdminChat(true); chatTimer = setInterval(()=>refreshAdminChat(false), 5000); }
             else { clearInterval(chatTimer); }
+        }
+
+        // アーカイブ機能 (フロント側でのみ制御)
+        function toggleArchive(pid) {
+            if (archivedPjs.includes(pid)) archivedPjs = archivedPjs.filter(id => id !== pid);
+            else archivedPjs.push(pid);
+            localStorage.setItem('archived_pjs', JSON.stringify(archivedPjs));
+            loadAll();
         }
 
         function toggleRuleInputs() {
@@ -287,14 +305,29 @@
             const res = await callApi({ action: 'getAllProjects' });
             if(!res.success) return;
             const body = document.getElementById('pjTableBody');
-            body.innerHTML = res.projects.map(pj => `
-                <tr class="hover:bg-blue-50 transition cursor-pointer" onclick="openDetail('${pj.projectId}')">
-                    <td class="p-4"><div class="font-black text-slate-800 text-base">${pj.userName}</div><div class="text-[10px] text-slate-400 mt-0.5">${pj.projectId}</div></td>
-                    <td class="p-4"><span class="text-[10px] font-black px-2.5 py-1 bg-white text-slate-600 rounded-lg border shadow-sm">${pj.status}</span></td>
-                    <td class="p-4"><span class="text-xs font-bold ${pj.workState === '作業中' ? 'text-green-600' : 'text-red-500'}">${pj.workState}</span></td>
-                    <td class="p-4 text-right"><button class="text-blue-600 font-bold text-xs bg-white border border-blue-100 shadow-sm px-3 py-1.5 rounded-lg hover:bg-blue-50 transition">管理</button></td>
+            const showArchived = document.getElementById('showArchived').checked;
+
+            let projects = res.projects;
+            if (!showArchived) projects = projects.filter(pj => !archivedPjs.includes(pj.projectId));
+
+            body.innerHTML = projects.map(pj => {
+                const isArch = archivedPjs.includes(pj.projectId);
+                return `
+                <tr class="hover:bg-blue-50 transition border-b ${isArch ? 'opacity-60 bg-slate-50' : ''}">
+                    <td class="p-4 cursor-pointer" onclick="openDetail('${pj.projectId}')">
+                        <div class="font-black text-slate-800 text-base flex items-center gap-2">
+                            ${pj.userName} ${isArch ? '<span class="text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">書庫</span>' : ''}
+                        </div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">${pj.projectId}</div>
+                    </td>
+                    <td class="p-4 cursor-pointer" onclick="openDetail('${pj.projectId}')"><span class="text-[10px] font-black px-2.5 py-1 bg-white text-slate-600 rounded-lg border shadow-sm">${pj.status}</span></td>
+                    <td class="p-4 cursor-pointer" onclick="openDetail('${pj.projectId}')"><span class="text-xs font-bold ${pj.workState === '作業中' ? 'text-green-600' : 'text-red-500'}">${pj.workState}</span></td>
+                    <td class="p-4 text-right flex justify-end gap-2 items-center h-full pt-4">
+                        <button onclick="toggleArchive('${pj.projectId}')" class="text-slate-500 text-xs bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition">${isArch ? '復元' : '書庫へ'}</button>
+                        <button onclick="openDetail('${pj.projectId}')" class="text-blue-600 font-bold text-xs bg-white border border-blue-100 shadow-sm px-3 py-1.5 rounded-lg hover:bg-blue-50 transition">管理</button>
+                    </td>
                 </tr>
-            `).join('');
+            `}).join('');
         }
 
         async function openDetail(pid) {
@@ -308,7 +341,7 @@
             document.getElementById('detailTitle').innerText = pid;
             
             const sel = document.getElementById('editStatus');
-            const stsOpts = ['受注完了','作業中','レビュー中','支払い待ち','納品完了'];
+            const stsOpts = ['受注完了','作業中','レビュー中','支払い待ち','納品完了','完了'];
             sel.innerHTML = stsOpts.map(s => `<option value="${s}" ${pj.status===s?'selected':''}>${s}</option>`).join('');
             document.getElementById('editWarning').value = pj.warningMsg || '';
             document.getElementById('editSubStatus').value = pj.subStatus || '';
@@ -393,7 +426,6 @@
                 document.querySelectorAll('input[name="cDay"]:checked').forEach(e => customDays.push(e.value));
                 if(customDays.length === 0) return alert("曜日を選択してください");
             }
-            // 複数期間除外の収集
             let exPeriods = [];
             document.querySelectorAll('.ex-period-row').forEach(row => {
                 const s = row.querySelector('.ex-start').value; const e = row.querySelector('.ex-end').value;
@@ -418,27 +450,49 @@
             openDetail(activePid); loadAll();
         }
 
+        // ★ チャットの楽観的UI更新
         async function sendAdminMsg() {
             const input = document.getElementById('adminChatInput');
-            if(!input.value.trim()) return;
-            await callApi({ action: 'sendMessage', projectId: activePid, sender: 'admin', message: input.value.trim() }, 'POST', true);
-            input.value = ''; refreshAdminChat(true);
+            const msg = input.value.trim();
+            if(!msg) return;
+            input.value = '';
+            
+            // 即時UI反映
+            adminMessages.push({ sender: 'admin', message: msg, timestamp: '送信中...' });
+            renderAdminMessages(true);
+
+            await callApi({ action: 'sendMessage', projectId: activePid, sender: 'admin', message: msg }, 'POST', true);
+            refreshAdminChat(true);
         }
-        async function refreshAdminChat(scroll=false) {
+
+        async function refreshAdminChat(forceScroll = false) {
             if(!activePid) return;
             const res = await callApi({ action: 'getMessages', projectId: activePid }, 'GET', true);
+            if(res.success) {
+                adminMessages = res.messages;
+                renderAdminMessages(forceScroll);
+            }
+        }
+
+        function renderAdminMessages(forceScroll = false) {
             const box = document.getElementById('adminChatBox');
-            box.innerHTML = res.messages.map(m => {
+            lastMsgCount = adminMessages.length;
+
+            box.innerHTML = adminMessages.map(m => {
                 const isMe = m.sender === 'admin';
-                return `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-4">
+                const dateObj = new Date(m.timestamp);
+                const time = isNaN(dateObj) ? '送信中...' : dateObj.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});
+                return `
+                <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-4">
                     <span class="text-[9px] text-slate-400 font-bold mb-1 mx-1 tracking-widest">${isMe ? 'YOU' : 'CLIENT'}</span>
                     <div class="flex items-end gap-1.5 ${isMe ? 'flex-row-reverse' : 'flex-row'}">
                         <div class="max-w-[85%] ${isMe ? 'bg-slate-800 text-white rounded-2xl rounded-tr-sm' : 'bg-slate-100 text-slate-800 rounded-2xl rounded-tl-sm border border-slate-200'} p-3.5 shadow-sm text-sm leading-relaxed">${m.message}</div>
-                        <span class="text-[9px] font-bold text-slate-400 pb-1">${new Date(m.timestamp).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}</span>
+                        <span class="text-[9px] font-bold text-slate-400 pb-1">${time}</span>
                     </div>
                 </div>`;
             }).join('');
-            if(scroll || box.scrollTop + box.clientHeight >= box.scrollHeight - 50) box.scrollTop = box.scrollHeight;
+            
+            if(forceScroll || box.scrollTop + box.clientHeight >= box.scrollHeight - 50) box.scrollTop = box.scrollHeight;
         }
 
         async function saveUser() {
